@@ -243,6 +243,35 @@ fn post_process_fds(ancillary: &AncillaryMessageReader) {
 	}
 }
 
+#[cfg(any(target_os = "android", target_os = "linux"))]
+fn path_to_sockaddr(path: &Path) -> std::io::Result<(libc::sockaddr_un, usize)> {
+	use std::os::unix::ffi::OsStrExt;
+	let path = path.as_os_str().as_bytes();
+	unsafe {
+		let mut sockaddr: libc::sockaddr_un = core::mem::zeroed();
+		let path_offset = sockaddr.sun_path.as_ptr() as usize - (&sockaddr as *const _ as usize);
+		let mut max_len = core::mem::size_of_val(&sockaddr.sun_path);
+		let mut sock_len = path_offset + path.len();
+		if let Some(b'\0') = path.get(0) {} else {
+			max_len -= 1;
+			sock_len += 1;
+		}
+
+		if path.len() > max_len {
+			return Err(std::io::Error::new(
+				std::io::ErrorKind::InvalidInput,
+				"path length exceeds maximum sockaddr length",
+			));
+		}
+
+		sockaddr.sun_family = libc::AF_UNIX as _;
+		core::ptr::copy_nonoverlapping(path.as_ptr(), sockaddr.sun_path.as_mut_ptr() as *mut u8, path.len());
+		sockaddr.sun_path[path.len()] = 0;
+		Ok((sockaddr, sock_len))
+	}
+}
+
+#[cfg(not(any(target_os = "android", target_os = "linux")))]
 fn path_to_sockaddr(path: &Path) -> std::io::Result<(libc::sockaddr_un, usize)> {
 	use std::os::unix::ffi::OsStrExt;
 	let path = path.as_os_str().as_bytes();
